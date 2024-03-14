@@ -1,0 +1,26 @@
+[package]
+name = "steamworksjs"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2.13.1", features = ["tokio_rt", "napi6", "serde-json"] }
+napi-derive = "2.13.0"
+lazy_static = "1"
+tokio = { version = "1", features = ["sync", "time"] }
+steamworks = { path = "../san_steamworks-rs", features = [
+   "serde",
+] }
+serde = "1"
+serde_json = "1"
+winreg = "0.52"
+window_titles = { path = "../window_titles" }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true

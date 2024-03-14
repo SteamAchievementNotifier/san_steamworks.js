@@ -1,0 +1,16 @@
+{
+    "name": "steamworks.js-electron-test",
+    "private": true,
+    "dependencies": {
+        "steamworks.js": "../.."
+    },
+    "devDependencies": {
+        "electron": "24.2.0",
+        "electron-packager": "17.1.1"
+    },
+    "main": "main.js",
+    "scripts": {
+        "start": "electron .",
+        "build": "electron-packager . --overwrite"
+    }
+}
