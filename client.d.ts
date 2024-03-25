@@ -71,12 +71,5 @@ export namespace processes {
     exe: string
     pid: number
   }
-  export function getGameProcesses(appid: number): Array<ProcessInfo>
-  export interface Info {
-    title: string
-    name: string
-    pid: number
-  }
-  export function getProcessInfoFromPid(pid: number): Info
-  export function isGameWindowOpen(wintitle: string): boolean
+  export function getGameProcesses(appid: number, linkedgame?: string | undefined | null): Array<ProcessInfo>
 }

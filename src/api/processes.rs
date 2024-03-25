@@ -51,85 +51,98 @@ pub mod processes {
     }
     
     #[napi]
-    pub fn get_game_processes(appid: u32) -> Vec<ProcessInfo> {
+    pub fn get_game_processes(appid: u32, linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use super::win32::{Command,CommandExt,CREATENOWINDOW};
         let mut processes = Vec::new();
-    
-        for exe_name in get_game_exes(appid) {
-            let output = Command::new("tasklist")
-                .creation_flags(CREATENOWINDOW)
-                .arg("/FI")
-                .arg(format!("IMAGENAME eq {}",exe_name))
-                .output()
-                .expect("Failed to execute command");
 
-            let tasklist = String::from_utf8_lossy(&output.stdout);
+        let exes = match linkedgame {
+            Some(game) => vec![game,"SAM.Game.exe".to_string()],
+            None => get_game_exes(appid)
+        };
+
+        println!("{:?}",exes);
+
+        let output = Command::new("tasklist")
+            .creation_flags(CREATENOWINDOW)
+            .output()
+            .expect("Failed to execute tasklist command");
+
+        let tasklist = String::from_utf8_lossy(&output.stdout);
     
+        for exe_name in exes {
+            let mut found = false;
+
             for line in tasklist.lines().skip(3) {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    if let Ok(pid) = parts[1].parse::<u32>() {
-                        processes.push(ProcessInfo {
-                            exe: exe_name.clone(),
-                            pid,
-                        });
+                if line.contains(&exe_name) {
+                    found = true;
+
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Ok(pid) = parts[1].parse::<u32>() {
+                            processes.push(ProcessInfo {
+                                exe: exe_name.clone(),
+                                pid,
+                            });
+                        }
                     }
                 }
             }
+
+            if !found { println!("INFO: No tasks are running for \"{}\"",exe_name); }
         }
-    
+
         processes
     }
 
-    use window_titles::{Connection, ConnectionTrait};
-    use lazy_static::lazy_static;
+    // use window_titles::{Connection, ConnectionTrait};
+    // use lazy_static::lazy_static;
 
-    #[napi(object)]
-    pub struct Info {
-        pub title: String,
-        pub name: String,
-        pub pid: u32
-    }
+    // #[napi(object)]
+    // pub struct Info {
+    //     pub title: String,
+    //     pub name: String,
+    //     pub pid: u32
+    // }
 
-    lazy_static! {
-        static ref CONNECTION: Connection = Connection::new().unwrap();
-    }
+    // lazy_static! {
+    //     static ref CONNECTION: Connection = Connection::new().unwrap();
+    // }
 
-    #[napi]
-    pub fn get_process_info_from_pid(pid: u32) -> Info {
-        CONNECTION
-            .windows()
-            .into_iter()
-            .filter(|p| p.process().0 == pid)
-            .nth(0)
-            .map(|w| Info {
-                title: w.name().unwrap(),
-                name: w.process().name(),
-                pid: w.process().0,
-            })
-            .unwrap_or_else(|| Info {
-                title: "".to_string(),
-                name: "".to_string(),
-                pid
-            })
-    }
+    // #[napi]
+    // pub fn get_process_info_from_pid(pid: u32) -> Info {
+    //     CONNECTION
+    //         .windows()
+    //         .into_iter()
+    //         .filter(|p| p.process().0 == pid)
+    //         .nth(0)
+    //         .map(|w| Info {
+    //             title: w.name().unwrap(),
+    //             name: w.process().name(),
+    //             pid: w.process().0,
+    //         })
+    //         .unwrap_or_else(|| Info {
+    //             title: "".to_string(),
+    //             name: "".to_string(),
+    //             pid
+    //         })
+    // }
 
-    #[napi]
-    pub fn is_game_window_open(wintitle: String) -> bool {
-        match CONNECTION
-            .windows()
-            .into_iter()
-            .filter(|p| p.name().expect(&format!("Unable to filter window name value for {}",wintitle)) == wintitle)
-            .nth(0)
-            .and_then(|w| Some(w.name())) {
-            Some(_) => {
-                println!("Window is active: {}",wintitle);
-                true
-            },
-            None => {
-                eprintln!("Window is NOT active");
-                false
-            }
-        }
-    }
+    // #[napi]
+    // pub fn is_game_window_open(wintitle: String) -> bool {
+    //     match CONNECTION
+    //         .windows()
+    //         .into_iter()
+    //         .filter(|p| p.name().expect(&format!("Unable to filter window name value for {}",wintitle)) == wintitle)
+    //         .nth(0)
+    //         .and_then(|w| Some(w.name())) {
+    //         Some(_) => {
+    //             println!("Window is active: {}",wintitle);
+    //             true
+    //         },
+    //         None => {
+    //             eprintln!("Window is NOT active");
+    //             false
+    //         }
+    //     }
+    // }
 }
