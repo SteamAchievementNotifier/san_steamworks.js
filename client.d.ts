@@ -8,6 +8,8 @@ export interface PlayerSteamId {
 }
 export namespace achievement {
   export function isActivated(achievement: string): boolean
+  export function unlock(achievement: string): boolean
+  export function lock(achievement: string): boolean
   export function getAchievementDisplayAttribute(achievement: string, key: string): string
   export function getAchievementAchievedPercent(achievement: string): number
   export interface Icon {
@@ -68,8 +70,8 @@ export namespace utils {
 }
 export namespace processes {
   export interface ProcessInfo {
-    exe: string
     pid: number
+    exe: string
   }
   export function getGameProcesses(appid: number, linkedgame?: string | undefined | null): Array<ProcessInfo>
 }

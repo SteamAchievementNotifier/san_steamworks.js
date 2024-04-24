@@ -1,8 +1,9 @@
+extern crate glob;
 use napi_derive::napi;
 
 #[cfg(target_os="windows")]
 pub mod win32 {
-    pub use std::{process::Command,os::windows::process::CommandExt};
+    pub use std::os::windows::process::CommandExt;
     pub const CREATENOWINDOW: u32 = 0x08000000;
     pub use winreg::RegKey;
     pub use winreg::enums::HKEY_CURRENT_USER;
@@ -10,22 +11,37 @@ pub mod win32 {
 
 #[napi]
 pub mod processes {
-    fn get_install_dir_exes(appid: u32, dir: &std::path::Path) -> Vec<String> {    
+    #[allow(unused_mut)]
+    fn get_install_dir_exes(dir: String) -> Vec<String> {
+        use glob::glob;
+
         let mut install_dir_exes = Vec::new();
-    
-        match std::fs::read_dir(dir) {
-            Ok(entries) => {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    if path.is_file() && path.extension().map_or(false, |ext| ext == "exe") {
-                        install_dir_exes.push(path.file_name().unwrap().to_string_lossy().to_string());
-                    } else if path.is_dir() {
-                        install_dir_exes.extend(get_install_dir_exes(appid, &path));
+
+        #[cfg(target_os="windows")]
+        let ext = ".exe";
+
+        #[cfg(target_os="linux")]
+        let ext = "";
+
+        let pattern = format!("{}/**/*{}",dir,ext);
+
+        for entry in glob(&pattern).expect("Failed to read glob pattern") {
+            match entry {
+                Ok(file) => {
+                    #[cfg(target_os="linux")] {
+                        use std::os::unix::fs::PermissionsExt;
+
+                        let metadata = std::fs::metadata(&file).expect("Failed to get file metadata");
+
+                        if metadata.permissions().mode() & 0o111 == 0 {
+                            install_dir_exes.push(file.file_name().expect("Failed to get file name").to_string_lossy().to_string())
+                        }
                     }
-                }
-            }
-            Err(err) => {
-                eprint!("Failed to read {:?} directory: {}",dir,err);
+
+                    #[cfg(target_os="windows")]
+                    install_dir_exes.push(file.file_name().expect("Failed to get file name").to_string_lossy().to_string())
+                },
+                Err(err) => println!("Error while iterating over dir entries: {}",err)
             }
         }
     
@@ -38,57 +54,99 @@ pub mod processes {
         let client = crate::client::get_client();
         let installdir = client.apps().app_install_dir(AppId::from(appid));
     
-        let mut exes = get_install_dir_exes(appid,&std::path::PathBuf::from(installdir));
+        let mut exes = get_install_dir_exes(installdir);
     
-        exes.push("SAM.Game.exe".to_string());
+        if cfg!(target_os="windows") {
+            exes.push("SAM.Game.exe".to_string());
+        }
+
         exes
     }
     
     #[napi(object)]
     pub struct ProcessInfo {
-        pub exe: String,
         pub pid: u32,
+        pub exe: String
     }
-    
+
     #[napi]
     pub fn get_game_processes(appid: u32, linkedgame: Option<String>) -> Vec<ProcessInfo> {
-        use super::win32::{Command,CommandExt,CREATENOWINDOW};
+        use std::process::Command;
+        use serde_json::{from_str,Value,Error};
+
         let mut processes = Vec::new();
+        get_game_exes(appid);
 
         let exes = match linkedgame {
             Some(game) => vec![game,"SAM.Game.exe".to_string()],
             None => get_game_exes(appid)
         };
 
-        println!("{:?}",exes);
+        let output: std::process::Output;
+        let cmd = if cfg!(target_os="windows") {
+            "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
+        } else if cfg!(target_os="linux") {
+            "ps -eo comm,pid,cmd | awk 'NR>1 {print \"{\\n\\t\\\"ProcessName\\\": \\\"\" $1 \"\\\",\\n\\t\\\"ProcessId\\\": \" $2 \",\\n\\t\\\"ExecutablePath\\\": \\\"\" $3 \"\\\"\\n},\"}' | sed '$ s/,$//'"
+        } else {
+            "Unsupported platform"
+        };
 
-        let output = Command::new("tasklist")
-            .creation_flags(CREATENOWINDOW)
-            .output()
-            .expect("Failed to execute tasklist command");
+        #[cfg(target_os="windows")] {
+            use super::win32::{CommandExt,CREATENOWINDOW};
 
-        let tasklist = String::from_utf8_lossy(&output.stdout);
+            output = Command::new("powershell")
+                .creation_flags(CREATENOWINDOW)
+                .args(["-Command",cmd])
+                .output()
+                .expect("Failed to execute \"GetWmiObject\" command");
+        }
+
+        #[cfg(target_os="linux")] {
+            output = Command::new("sh")
+                .args(["-c",cmd])
+                .output()
+                .expect("Failed to execute \"ps\" command");
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json: Result<Value,Error> = from_str(&stdout);
+
+        for exename in exes {
+            match &json {
+                Ok(value) => {
+                    let stdoutprocesses = value
+                        .as_array()
+                        .expect("\"json\" is not an array")
+                        .iter()
+                        .filter(|p| {
+                            if let Some(pname) = p["ProcessName"].as_str() {
+                                exename.to_lowercase() == pname.to_lowercase()
+                            } else {
+                                false
+                            }
+                        })
+                        .collect::<Vec<_>>();
     
-        for exe_name in exes {
-            let mut found = false;
+                    for process in stdoutprocesses {
+                        let pid = process["ProcessId"]
+                            .as_u64()
+                            .unwrap_or(0) as u32;
+    
+                        let exe = process["ExecutablePath"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string();
+                        
+                        println!("ProcessName: {}, ProcessId: {}, Executable Path: {}", exename, pid, exe);
 
-            for line in tasklist.lines().skip(3) {
-                if line.contains(&exe_name) {
-                    found = true;
-
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        if let Ok(pid) = parts[1].parse::<u32>() {
-                            processes.push(ProcessInfo {
-                                exe: exe_name.clone(),
-                                pid,
-                            });
-                        }
+                        processes.push(ProcessInfo {
+                            pid,
+                            exe
+                        });
                     }
                 }
+                Err(err) => println!("No running process found for {}: {}", exename, err),
             }
-
-            if !found { println!("INFO: No tasks are running for \"{}\"",exe_name); }
         }
 
         processes

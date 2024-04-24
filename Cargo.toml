@@ -16,6 +16,9 @@ steamworks = { git = "https://github.com/SteamAchievementNotifier/san_steamworks
 ] }
 serde = "1"
 serde_json = "1"
+glob = "0.3.1"
+
+[target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 
 [build-dependencies]
