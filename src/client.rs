@@ -27,6 +27,7 @@ pub fn drop_client() {
     *client_ref = None;
 }
 
+#[allow(static_mut_refs)]
 pub fn get_single() -> &'static SingleClient {
     unsafe {
         match &STEAM_SINGLE {

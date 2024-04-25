@@ -17,11 +17,15 @@ pub mod processes {
 
         let mut install_dir_exes = Vec::new();
 
-        #[cfg(target_os="windows")]
-        let ext = ".exe";
+        let ext: &str;
 
-        #[cfg(target_os="linux")]
-        let ext = "";
+        #[cfg(target_os="windows")] {
+            ext = ".exe";
+        }
+
+        #[cfg(target_os="linux")] {
+            ext = "";
+        }
 
         let pattern = format!("{}/**/*{}",dir,ext);
 
@@ -31,10 +35,15 @@ pub mod processes {
                     #[cfg(target_os="linux")] {
                         use std::os::unix::fs::PermissionsExt;
 
-                        let metadata = std::fs::metadata(&file).expect("Failed to get file metadata");
+                        let metadata = file.metadata().expect("Failed to get file metadata");
 
-                        if metadata.permissions().mode() & 0o111 == 0 {
-                            install_dir_exes.push(file.file_name().expect("Failed to get file name").to_string_lossy().to_string())
+                        if let Some(file_name) = file.file_name() {
+                            let file_name = file_name.to_string_lossy().to_string();
+                            let is_valid = file.is_file() && metadata.permissions().mode() & 0o111 != 0;
+        
+                            if is_valid {
+                                install_dir_exes.push(file_name);
+                            }
                         }
                     }
 
@@ -48,19 +57,13 @@ pub mod processes {
         install_dir_exes
     }
     
-    pub fn get_game_exes(appid: u32) -> Vec<String> {
+    fn get_game_exes(appid: u32) -> Vec<String> {
         use steamworks::AppId;
     
         let client = crate::client::get_client();
         let installdir = client.apps().app_install_dir(AppId::from(appid));
-    
-        let mut exes = get_install_dir_exes(installdir);
-    
-        if cfg!(target_os="windows") {
-            exes.push("SAM.Game.exe".to_string());
-        }
 
-        exes
+        get_install_dir_exes(installdir)
     }
     
     #[napi(object)]
@@ -69,24 +72,28 @@ pub mod processes {
         pub exe: String
     }
 
+    #[allow(unused)]
     #[napi]
     pub fn get_game_processes(appid: u32, linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use std::process::Command;
         use serde_json::{from_str,Value,Error};
 
         let mut processes = Vec::new();
-        get_game_exes(appid);
 
-        let exes = match linkedgame {
-            Some(game) => vec![game,"SAM.Game.exe".to_string()],
+        let mut exes = match linkedgame {
+            Some(game) => vec![game],
             None => get_game_exes(appid)
         };
+
+        if cfg!(target_os="windows") {
+            exes.push("SAM.Game.exe".to_string());
+        }
 
         let output: std::process::Output;
         let cmd = if cfg!(target_os="windows") {
             "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
         } else if cfg!(target_os="linux") {
-            "ps -eo comm,pid,cmd | awk 'NR>1 {print \"{\\n\\t\\\"ProcessName\\\": \\\"\" $1 \"\\\",\\n\\t\\\"ProcessId\\\": \" $2 \",\\n\\t\\\"ExecutablePath\\\": \\\"\" $3 \"\\\"\\n},\"}' | sed '$ s/,$//'"
+            "ps -eo comm,pid,cmd --no-headers"
         } else {
             "Unsupported platform"
         };
@@ -109,7 +116,40 @@ pub mod processes {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let json: Result<Value,Error> = from_str(&stdout);
+
+        let json: Result<Value,Error>;
+
+        #[cfg(target_os="windows")] {
+            json = from_str(&stdout);
+        }
+        
+        #[cfg(target_os="linux")] {
+            let mut json_output = Vec::new();
+            
+            use regex::Regex;
+
+            let regex = Regex::new(r#"^(.+)\s+(\d+)\s+(.+)$"#).expect("Failed to create regex");
+
+            for line in stdout.lines() {
+                if let Some(captures) = regex.captures(line) {
+                    let process_name = captures.get(1).map_or("<unknown>", |m| m.as_str().trim());
+                    let process_id = captures.get(2).map_or("<unknown>", |m| m.as_str().trim());
+                    let executable_path = captures.get(3).map_or("<unknown>", |m| m.as_str().trim());
+
+                    let json_obj = serde_json::json!({
+                        "ProcessName": process_name,
+                        "ProcessId": process_id,
+                        "ExecutablePath": executable_path
+                    });
+
+                    json_output.push(json_obj);
+                }
+            }
+
+            let json_array = Value::Array(json_output).to_string();
+
+            json = from_str(&json_array)
+        }
 
         for exename in exes {
             match &json {
@@ -128,9 +168,17 @@ pub mod processes {
                         .collect::<Vec<_>>();
     
                     for process in stdoutprocesses {
-                        let pid = process["ProcessId"]
-                            .as_u64()
-                            .unwrap_or(0) as u32;
+                        let pid = if cfg!(target_os="windows") {
+                            process["ProcessId"]
+                                .as_u64()
+                                .unwrap_or(0) as u32
+                        } else {
+                            process["ProcessId"]
+                                .as_str()
+                                .unwrap_or("0")
+                                .parse::<u32>()
+                                .unwrap_or(0) as u32
+                        };
     
                         let exe = process["ExecutablePath"]
                             .as_str()
@@ -151,56 +199,4 @@ pub mod processes {
 
         processes
     }
-
-    // use window_titles::{Connection, ConnectionTrait};
-    // use lazy_static::lazy_static;
-
-    // #[napi(object)]
-    // pub struct Info {
-    //     pub title: String,
-    //     pub name: String,
-    //     pub pid: u32
-    // }
-
-    // lazy_static! {
-    //     static ref CONNECTION: Connection = Connection::new().unwrap();
-    // }
-
-    // #[napi]
-    // pub fn get_process_info_from_pid(pid: u32) -> Info {
-    //     CONNECTION
-    //         .windows()
-    //         .into_iter()
-    //         .filter(|p| p.process().0 == pid)
-    //         .nth(0)
-    //         .map(|w| Info {
-    //             title: w.name().unwrap(),
-    //             name: w.process().name(),
-    //             pid: w.process().0,
-    //         })
-    //         .unwrap_or_else(|| Info {
-    //             title: "".to_string(),
-    //             name: "".to_string(),
-    //             pid
-    //         })
-    // }
-
-    // #[napi]
-    // pub fn is_game_window_open(wintitle: String) -> bool {
-    //     match CONNECTION
-    //         .windows()
-    //         .into_iter()
-    //         .filter(|p| p.name().expect(&format!("Unable to filter window name value for {}",wintitle)) == wintitle)
-    //         .nth(0)
-    //         .and_then(|w| Some(w.name())) {
-    //         Some(_) => {
-    //             println!("Window is active: {}",wintitle);
-    //             true
-    //         },
-    //         None => {
-    //             eprintln!("Window is NOT active");
-    //             false
-    //         }
-    //     }
-    // }
 }
