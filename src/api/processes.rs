@@ -199,4 +199,11 @@ pub mod processes {
 
         processes
     }
+
+    #[napi]
+    pub fn is_process_running(pid: u32) -> bool {
+        use process_alive::{state,State,Pid};
+
+        state(Pid::from(pid)) == State::Alive
+    }
 }
