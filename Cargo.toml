@@ -22,6 +22,9 @@ process_alive = "0.1.1"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 
+[target.'cfg(target_os="linux")'.dependencies]
+regex = "1.10.4"
+
 [build-dependencies]
 napi-build = "2"
 
