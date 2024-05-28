@@ -12,8 +12,10 @@ pub mod win32 {
 #[napi]
 pub mod processes {
     #[allow(unused_mut)]
-    fn get_install_dir_exes(dir: String) -> Vec<String> {
+    fn get_install_dir_exes(input: String) -> Vec<String> {
         use glob::glob;
+        use regex::Regex;
+        use std::path::Path;
 
         let mut install_dir_exes = Vec::new();
 
@@ -26,6 +28,16 @@ pub mod processes {
         #[cfg(target_os="linux")] {
             ext = "";
         }
+
+        let reg = Regex::new(r#"^(.+?)(?:\s-[a-zA-Z]|$)"#).unwrap();
+        let executable_path = reg.captures(&input)
+            .map(|captures| captures.get(1).unwrap().as_str().to_string())
+            .unwrap_or_else(|| input);
+
+        let dir = Path::new(&executable_path)
+            .to_str()
+            .unwrap()
+            .to_string();
 
         let pattern = format!("{}/**/*{}",dir,ext);
 
