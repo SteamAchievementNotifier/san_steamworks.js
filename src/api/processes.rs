@@ -29,9 +29,13 @@ pub mod processes {
             ext = "";
         }
 
-        let reg = Regex::new(r#"^(.+?)(?:\s-[a-zA-Z]|$)"#).unwrap();
-        let executable_path = reg.captures(&input)
-            .map(|captures| captures.get(1).unwrap().as_str().to_string())
+        let regex = Regex::new(r#"^(.+?)(?:\s-[a-zA-Z]|$)"#).expect("Failed to create Regex");
+
+        let executable_path = regex.captures(&input)
+            .map(|captures| captures.get(1)
+            .unwrap()
+            .as_str()
+            .to_string())
             .unwrap_or_else(|| input);
 
         let dir = Path::new(&executable_path)
@@ -51,7 +55,8 @@ pub mod processes {
 
                         if let Some(file_name) = file.file_name() {
                             let file_name = file_name.to_string_lossy().to_string();
-                            let is_valid = file.is_file() && metadata.permissions().mode() & 0o111 != 0;
+                            let has_valid_ext = file_name.find(".").is_none() || file_name.ends_with(".sh") || file_name.ends_with(".so");
+                            let is_valid = file.is_file() && metadata.permissions().mode() & 0o111 != 0 && has_valid_ext;
         
                             if is_valid {
                                 install_dir_exes.push(file_name);
@@ -136,11 +141,10 @@ pub mod processes {
         }
         
         #[cfg(target_os="linux")] {
-            let mut json_output = Vec::new();
-            
             use regex::Regex;
 
-            let regex = Regex::new(r#"^(.+)\s+(\d+)\s+(.+)$"#).expect("Failed to create regex");
+            let mut json_output = Vec::new();
+            let regex = Regex::new(r#"^(\S+)\s+(\d+)\s+(.+)$"#).expect("Failed to create Regex");
 
             for line in stdout.lines() {
                 if let Some(captures) = regex.captures(line) {
