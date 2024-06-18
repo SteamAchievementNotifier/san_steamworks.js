@@ -55,7 +55,7 @@ pub mod processes {
 
                         if let Some(file_name) = file.file_name() {
                             let file_name = file_name.to_string_lossy().to_string();
-                            let has_valid_ext = file_name.find(".").is_none() || file_name.ends_with(".sh") || file_name.ends_with(".so");
+                            let has_valid_ext = file_name.find(".").is_none() || file_name.ends_with(".sh") || file_name.ends_with(".so") || file_name.ends_with(".exe");
                             let is_valid = file.is_file() && metadata.permissions().mode() & 0o111 != 0 && has_valid_ext;
         
                             if is_valid {
