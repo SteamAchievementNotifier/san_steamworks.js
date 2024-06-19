@@ -19,6 +19,9 @@ serde_json = "1"
 glob = "0.3.1"
 process_alive = "0.1.1"
 regex = "1.10.4"
+fern = "0.6.2"
+log = "0.4.21"
+chrono = "0.4.38"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Error;
 use napi_derive::napi;
 use steamworks::AppId;
 use steamworks::Client;
+use log::{info,error};
 
 pub mod client;
 
@@ -23,8 +24,12 @@ pub fn init(app_id: Option<u32>) -> core::result::Result<(), Error> {
     steam_client.user_stats().request_current_stats();
     steam_client.user_stats().request_global_achievement_percentages(move|result|{
         match result {
-            Ok(id) => println!("GlobalAchievementPercentagesReady callback recieved for AppId {:?}",id),
-            Err(err) => eprintln!("Error calling RequestGlobalAchievementPercentages: {:?}",err),
+            Ok(id) => {
+                info!("GlobalAchievementPercentagesReady callback recieved for AppId {:?}",id);
+            },
+            Err(err) => {
+                error!("Error calling RequestGlobalAchievementPercentages: {:?}",err);
+            },
         }
     });
 

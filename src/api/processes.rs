@@ -11,6 +11,8 @@ pub mod win32 {
 
 #[napi]
 pub mod processes {
+    use log::{info,error};
+
     #[allow(unused_mut)]
     fn get_install_dir_exes(input: String) -> Vec<String> {
         use glob::glob;
@@ -67,7 +69,7 @@ pub mod processes {
                     #[cfg(target_os="windows")]
                     install_dir_exes.push(file.file_name().expect("Failed to get file name").to_string_lossy().to_string())
                 },
-                Err(err) => println!("Error while iterating over dir entries: {}",err)
+                Err(err) => error!("Error while iterating over dir entries: {}",err)
             }
         }
     
@@ -148,9 +150,9 @@ pub mod processes {
 
             for line in stdout.lines() {
                 if let Some(captures) = regex.captures(line) {
-                    let process_name = captures.get(1).map_or("<unknown>", |m| m.as_str().trim());
-                    let process_id = captures.get(2).map_or("<unknown>", |m| m.as_str().trim());
-                    let executable_path = captures.get(3).map_or("<unknown>", |m| m.as_str().trim());
+                    let process_name = captures.get(1).map_or("<unknown>",|m| m.as_str().trim());
+                    let process_id = captures.get(2).map_or("<unknown>",|m| m.as_str().trim());
+                    let executable_path = captures.get(3).map_or("<unknown>",|m| m.as_str().trim());
 
                     let json_obj = serde_json::json!({
                         "ProcessName": process_name,
@@ -201,7 +203,7 @@ pub mod processes {
                             .unwrap_or("")
                             .to_string();
                         
-                        println!("ProcessName: {}, ProcessId: {}, Executable Path: {}", exename, pid, exe);
+                        info!("ProcessName: {}, ProcessId: {}, Executable Path: {}",exename,pid,exe);
 
                         processes.push(ProcessInfo {
                             pid,
@@ -209,7 +211,7 @@ pub mod processes {
                         });
                     }
                 }
-                Err(err) => println!("No running process found for {}: {}", exename, err),
+                Err(err) => error!("No running process found for {}: {}",exename,err),
             }
         }
 

@@ -3,6 +3,7 @@ use napi_derive::napi;
 #[napi]
 pub mod achievement {
     use std::{thread::sleep,time::Duration};
+    use log::error;
 
     const MAX: usize = 10;
 
@@ -41,12 +42,17 @@ pub mod achievement {
     #[napi]
     pub fn get_achievement_display_attribute(achievement: String, key: String) -> String {
         let client = crate::client::get_client();
-        client
-            .user_stats()
-            .achievement(&achievement)
+        let user_stats = client.user_stats();
+        let achievement_data = user_stats.achievement(&achievement);
+        let result = achievement_data
             .get_achievement_display_attribute(&key)
-            .expect(&format!("Error getting \"{}\" attribute for \"{}\"",&key,&achievement))
-            .to_string()
+            .unwrap_or_default();
+
+        if result.is_empty() {
+            error!("Failed to get \"{}\" attribute for \"{}\"",&key,&achievement);
+        }
+
+        result.to_string()
     }
 
     #[napi]
@@ -61,13 +67,13 @@ pub mod achievement {
             {
                 Ok(percent) => return percent,
                 Err(_) => {
-                    eprintln!("{}/{}: Retrying attempt to fetch achievement percentage for {}",i,MAX,&achievement);
+                    error!("{}/{}: Retrying attempt to fetch achievement percentage for {}",i,MAX,&achievement);
                     sleep(Duration::from_millis(250));
                 }
             }
         }
 
-        eprintln!("{}/{} ATTEMPTS FAILED: Failed to fetch achievement percentage for {}",MAX,MAX,&achievement);
+        error!("{}/{} ATTEMPTS FAILED: Failed to fetch achievement percentage for {}",MAX,MAX,&achievement);
         0.0
     }
 
@@ -94,12 +100,12 @@ pub mod achievement {
                     height: icon.height
                 })
             } else {
-                eprintln!("{}/{}: Retrying attempt to fetch achievement icon for {}",i,MAX,&achievement);
+                error!("{}/{}: Retrying attempt to fetch achievement icon for {}",i,MAX,&achievement);
                 sleep(Duration::from_millis(250));
             }
         }
 
-        eprintln!("{}/{} ATTEMPTS FAILED: Failed to fetch achievement icon for {}",MAX,MAX,&achievement);
+        error!("{}/{} ATTEMPTS FAILED: Failed to fetch achievement icon for {}",MAX,MAX,&achievement);
         Some(Icon {
             handle: vec![0],
             width: 0,
@@ -115,13 +121,13 @@ pub mod achievement {
             match client.user_stats().get_num_achievements() {
                 Ok(num) => return num,
                 Err(_) => {
-                    eprintln!("{}/{}: Retrying attempt to get number of achievements",i,MAX);
+                    error!("{}/{}: Retrying attempt to get number of achievements",i,MAX);
                     sleep(Duration::from_millis(250));
                 }
             }
         }
     
-        eprintln!("{}/{} ATTEMPTS FAILED: Failed to get number of achievements",MAX,MAX);
+        error!("{}/{} ATTEMPTS FAILED: Failed to get number of achievements",MAX,MAX);
         0
     }
 
@@ -136,12 +142,12 @@ pub mod achievement {
             {
                 return names
             } else {
-                eprintln!("{}/5: Retrying attempt to get achievement names",i);
+                error!("{}/5: Retrying attempt to get achievement names",i);
                 sleep(Duration::from_millis(250));
             }
         }
 
-        eprintln!("{}/{} ATTEMPTS FAILED: Failed to get achievement names",MAX,MAX);
+        error!("{}/{} ATTEMPTS FAILED: Failed to get achievement names",MAX,MAX);
         Vec::new()
     }
 }

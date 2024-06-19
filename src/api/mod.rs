@@ -4,3 +4,4 @@ pub mod callback;
 pub mod localplayer;
 pub mod utils;
 pub mod processes;
+pub mod log;
