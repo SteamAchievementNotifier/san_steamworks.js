@@ -12,11 +12,10 @@ extern crate lazy_static;
 #[napi]
 pub fn init(app_id: Option<u32>) -> core::result::Result<(), Error> {
     if client::has_client() {
-        client::drop_single();
         client::drop_client();
     }
 
-    let (steam_client, steam_single) = app_id
+    let steam_client = app_id
         .map(|app_id| Client::init_app(AppId(app_id)))
         .unwrap_or_else(Client::init)
         .map_err(|e| Error::from_reason(e.to_string()))?;
@@ -34,7 +33,6 @@ pub fn init(app_id: Option<u32>) -> core::result::Result<(), Error> {
     });
 
     client::set_client(steam_client);
-    client::set_single(steam_single);
     Ok(())
 }
 
@@ -45,7 +43,7 @@ pub fn restart_app_if_necessary(app_id: u32) -> bool {
 
 #[napi]
 pub fn run_callbacks() {
-    client::get_single().run_callbacks();
+    client::get_client().run_callbacks();
 }
 
 pub mod api;
