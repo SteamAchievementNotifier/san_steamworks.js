@@ -13,6 +13,8 @@ pub mod win32 {
 pub mod processes {
     use log::{info,error};
 
+    static REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
+
     #[allow(unused_mut)]
     fn get_install_dir_exes(input: String) -> Vec<String> {
         use glob::glob;
@@ -31,7 +33,7 @@ pub mod processes {
             ext = "";
         }
 
-        let regex = Regex::new(r#"^(.+?)(?:\s-[a-zA-Z]|$)"#).expect("Failed to create Regex");
+        let regex = Regex::new(REGEX).expect("Failed to create Regex");
 
         let executable_path = regex.captures(&input)
             .map(|captures| captures.get(1)
@@ -146,7 +148,7 @@ pub mod processes {
             use regex::Regex;
 
             let mut json_output = Vec::new();
-            let regex = Regex::new(r#"^(\S+)\s+(\d+)\s+(.+)$"#).expect("Failed to create Regex");
+            let regex = Regex::new(REGEX).expect("Failed to create Regex");
 
             for line in stdout.lines() {
                 if let Some(captures) = regex.captures(line) {
