@@ -86,16 +86,54 @@ pub mod processes {
 
         get_install_dir_exes(installdir)
     }
+
+    // #[allow(unused)]
+    // fn get_window_title(pid: u32) -> Option<String> {
+    //     #[cfg(target_os="windows")] {
+    //         None
+    //     }
+        
+    //     #[cfg(target_os="linux")] {
+    //         if !wmctrl_deps() {
+    //             return None
+    //         }
+        
+    //         let output = Command::new("wmctrl")
+    //             .arg("-lp")
+    //             .output()
+    //             .expect("Failed to get output from \"wmctrl\"");
+        
+    //         let stdout = String::from_utf8_lossy(&output.stdout);
+        
+    //         for line in stdout.lines() {
+    //             let parts: Vec<&str> = line.split_whitespace().collect();
+        
+    //             if parts.len() < 5 {
+    //                 continue;
+    //             }
+        
+    //             if let Ok(line_pid) = parts[2].parse::<u32>() {
+    //                 if line_pid == pid {
+    //                     let window = parts[4..].join(" ");
+    //                     return Some(window);
+    //                 }
+    //             }
+    //         }
+        
+    //         None
+    //     }
+    // }
     
     #[napi(object)]
     pub struct ProcessInfo {
         pub pid: u32,
-        pub exe: String
+        pub exe: String,
+        pub windowtitle: String
     }
 
     #[allow(unused)]
     #[napi]
-    pub fn get_game_processes(appid: u32, linkedgame: Option<String>) -> Vec<ProcessInfo> {
+    pub fn get_game_processes(appid: u32,linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use std::process::Command;
         use serde_json::{from_str,Value,Error};
 
@@ -113,6 +151,7 @@ pub mod processes {
         let output: std::process::Output;
         let cmd = if cfg!(target_os="windows") {
             "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
+            // "Get-Process | where { $_.MainWindowTitle } | foreach { $wmi = Get-WmiObject Win32_Process -Filter \"ProcessId = $($_.Id)\"; $_ | select @{Name=\"ProcessName\";Expression={$wmi.ProcessName}}, @{Name=\"ProcessId\";Expression={$wmi.ProcessId}}, @{Name=\"ExecutablePath\";Expression={$wmi.ExecutablePath}}, MainWindowTitle } | ConvertTo-Json"
         } else if cfg!(target_os="linux") {
             "ps -eo comm,pid,cmd --no-headers"
         } else {
@@ -126,7 +165,7 @@ pub mod processes {
                 .creation_flags(CREATENOWINDOW)
                 .args(["-Command",cmd])
                 .output()
-                .expect("Failed to execute \"GetWmiObject\" command");
+                .expect("Failed to run process list command");
         }
 
         #[cfg(target_os="linux")] {
@@ -204,12 +243,27 @@ pub mod processes {
                             .as_str()
                             .unwrap_or("")
                             .to_string();
+
+                        // let windowtitle = if cfg!(target_os="windows") {
+                        //     process["MainWindowTitle"]
+                        //         .as_str()
+                        //         .unwrap_or("")
+                        //         .to_string()
+                        // } else {
+                        //     match get_window_title(pid) {
+                        //         Some(str) => str,
+                        //         None => "".to_string()
+                        //     }
+                        // };
+
+                        let windowtitle = "".to_string();
                         
-                        info!("ProcessName: {}, ProcessId: {}, Executable Path: {}",exename,pid,exe);
+                        info!("ProcessName: {}, ProcessId: {}, ExecutablePath: {}, WindowTitle: {}",exename,pid,exe,windowtitle);
 
                         processes.push(ProcessInfo {
                             pid,
-                            exe
+                            exe,
+                            windowtitle
                         });
                     }
                 }
