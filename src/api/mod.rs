@@ -5,3 +5,4 @@ pub mod localplayer;
 pub mod log;
 pub mod utils;
 pub mod processes;
+pub mod wininfo;
