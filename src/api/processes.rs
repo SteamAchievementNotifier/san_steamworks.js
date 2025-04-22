@@ -90,8 +90,7 @@ pub mod processes {
     #[napi(object)]
     pub struct ProcessInfo {
         pub pid: u32,
-        pub exe: String,
-        pub windowtitle: String
+        pub exe: String
     }
 
     #[allow(unused)]
@@ -113,8 +112,8 @@ pub mod processes {
 
         let output: std::process::Output;
         let cmd = if cfg!(target_os="windows") {
-            // "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
-            "Get-Process | where { $_.MainWindowTitle } | foreach { $wmi = Get-WmiObject Win32_Process -Filter \"ProcessId = $($_.Id)\"; $_ | select @{Name=\"ProcessName\";Expression={$wmi.ProcessName}}, @{Name=\"ProcessId\";Expression={$wmi.ProcessId}}, @{Name=\"ExecutablePath\";Expression={$wmi.ExecutablePath}}, MainWindowTitle } | ConvertTo-Json"
+            "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
+            // "Get-Process | where { $_.MainWindowTitle } | foreach { $wmi = Get-WmiObject Win32_Process -Filter \"ProcessId = $($_.Id)\"; $_ | select @{Name=\"ProcessName\";Expression={$wmi.ProcessName}}, @{Name=\"ProcessId\";Expression={$wmi.ProcessId}}, @{Name=\"ExecutablePath\";Expression={$wmi.ExecutablePath}}, MainWindowTitle } | ConvertTo-Json"
         } else if cfg!(target_os="linux") {
             "ps -eo comm,pid,cmd --no-headers"
         } else {
@@ -207,26 +206,11 @@ pub mod processes {
                             .unwrap_or("")
                             .to_string();
 
-                        let windowtitle = if cfg!(target_os="windows") {
-                            process["MainWindowTitle"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string()
-                        } else {
-                            use crate::api::wininfo::wininfo::get_window_title;
-                            
-                            match get_window_title(pid) {
-                                Some(str) => str,
-                                None => "".to_string()
-                            }
-                        };
-                        
-                        info!("ProcessName: {}, ProcessId: {}, ExecutablePath: {}, WindowTitle: {}",exename,pid,exe,windowtitle);
+                        info!("ProcessName: {}, ProcessId: {}, ExecutablePath: {}",exename,pid,exe);
 
                         processes.push(ProcessInfo {
                             pid,
-                            exe,
-                            windowtitle
+                            exe
                         });
                     }
                 }
@@ -242,5 +226,13 @@ pub mod processes {
         use process_alive::{state,State,Pid};
 
         state(Pid::from(pid)) == State::Alive
+    }
+
+    #[napi]
+    pub fn get_window_title(pid: u32) -> String {
+        match crate::api::wininfo::wininfo::window_title_from_pid(pid) {
+            Some(windowtitle) => windowtitle,
+            None => "".to_string()
+        }
     }
 }

@@ -1,7 +1,26 @@
 pub mod wininfo {
     #[allow(unused)]
-    pub fn get_window_title(pid: u32) -> Option<String> {
+    pub fn window_title_from_pid(pid: u32) -> Option<String> {
+        use std::process::Command;
+        
         #[cfg(target_os="windows")] {
+            use std::os::windows::process::CommandExt;
+            const CREATENOWINDOW: u32 = 0x08000000;
+
+            let cmd = format!("Get-Process | where {{ $_.Id -eq {} }} | select -ExpandProperty MainWindowTitle",pid);
+
+            let output = Command::new("powershell")
+                .creation_flags(CREATENOWINDOW)
+                .args(["-Command",&cmd])
+                .output()
+                .expect("Failed to run process list command");
+
+            let windowtitle= String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+            if !windowtitle.is_empty() {
+                return Some(windowtitle)
+            }
+
             None
         }
         
