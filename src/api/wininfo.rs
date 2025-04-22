@@ -25,10 +25,6 @@ pub mod wininfo {
         }
         
         #[cfg(target_os="linux")] {
-            if !wmctrl_deps() {
-                return None
-            }
-        
             let output = Command::new("wmctrl")
                 .arg("-lp")
                 .output()
