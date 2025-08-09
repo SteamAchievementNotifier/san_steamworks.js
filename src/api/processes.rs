@@ -112,7 +112,8 @@ pub mod processes {
 
         let output: std::process::Output;
         let cmd = if cfg!(target_os="windows") {
-            "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
+            "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
+            // "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
             // "Get-Process | where { $_.MainWindowTitle } | foreach { $wmi = Get-WmiObject Win32_Process -Filter \"ProcessId = $($_.Id)\"; $_ | select @{Name=\"ProcessName\";Expression={$wmi.ProcessName}}, @{Name=\"ProcessId\";Expression={$wmi.ProcessId}}, @{Name=\"ExecutablePath\";Expression={$wmi.ExecutablePath}}, MainWindowTitle } | ConvertTo-Json"
         } else if cfg!(target_os="linux") {
             "ps -eo comm,pid,cmd --no-headers"
