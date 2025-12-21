@@ -13,78 +13,50 @@ pub mod win32 {
 pub mod processes {
     use log::{info,error};
 
-    static REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
+    #[napi]
+    pub fn get_appinfo(steampath: String) -> serde_json::Value {
+        use appinfovdf::get_appinfo;
+        get_appinfo(&steampath)
+    }
 
-    #[allow(unused_mut)]
-    fn get_install_dir_exes(input: String) -> Vec<String> {
-        use glob::glob;
-        use regex::Regex;
-        use std::path::Path;
-
-        let mut install_dir_exes = Vec::new();
-
-        let ext: &str;
-
-        #[cfg(target_os="windows")] {
-            ext = ".exe";
-        }
-
-        #[cfg(target_os="linux")] {
-            ext = "";
-        }
-
-        let regex = Regex::new(REGEX).expect("Failed to create Regex");
-
-        let executable_path = regex.captures(&input)
-            .map(|captures| captures.get(1)
-            .unwrap()
-            .as_str()
-            .to_string())
-            .unwrap_or_else(|| input);
-
-        let dir = Path::new(&executable_path)
-            .to_str()
-            .unwrap()
-            .to_string();
-
-        let pattern = format!("{}/**/*{}",dir,ext);
-
-        for entry in glob(&pattern).expect("Failed to read glob pattern") {
-            match entry {
-                Ok(file) => {
-                    #[cfg(target_os="linux")] {
-                        use std::os::unix::fs::PermissionsExt;
-
-                        let metadata = file.metadata().expect("Failed to get file metadata");
-
-                        if let Some(file_name) = file.file_name() {
-                            let file_name = file_name.to_string_lossy().to_string();
-                            let has_valid_ext = file_name.find(".").is_none() || file_name.ends_with(".sh") || file_name.ends_with(".so") || file_name.ends_with(".exe");
-                            let is_valid = file.is_file() && metadata.permissions().mode() & 0o111 != 0 && has_valid_ext;
+    #[napi]
+    pub fn get_appinfo_for_appid(appid: u32,steampath: String) -> serde_json::Value {
+        use appinfovdf::get_appinfo_for_appid;
         
-                            if is_valid {
-                                install_dir_exes.push(file_name);
-                            }
+        get_appinfo_for_appid(appid,&steampath).unwrap_or(serde_json::Value::Null)
+    }
+
+    fn get_appinfo_exe(appid: u32,steampath: String) -> Option<String> {
+        use appinfovdf::get_appinfo_for_appid;
+        use serde_json::Value::{Object,String};
+        
+        let appinfo = get_appinfo_for_appid(appid,&steampath);
+        
+        let platform = if cfg!(target_os="windows") {
+            "windows"
+        } else if cfg!(target_os="linux") {
+            "linux"
+        } else {
+            return None;
+        };
+
+        let clone = appinfo?;
+        let config = clone.get("config")?;
+        let launch = config.get("launch")?.as_object()?;
+
+        for entry in launch.values() {
+            if let Object(entrymap) = entry {
+                if let Some(String(oslist)) = entrymap.get("config").and_then(|cfg| cfg.get("oslist")) {
+                    if oslist == platform {
+                        if let Some(String(exe)) = entrymap.get("executable") {
+                            return Some(exe.clone());
                         }
                     }
-
-                    #[cfg(target_os="windows")]
-                    install_dir_exes.push(file.file_name().expect("Failed to get file name").to_string_lossy().to_string())
-                },
-                Err(err) => error!("Error while iterating over dir entries: {}",err)
+                }
             }
         }
-    
-        install_dir_exes
-    }
-    
-    fn get_game_exes(appid: u32) -> Vec<String> {
-        use steamworks::AppId;
-    
-        let client = crate::client::get_client();
-        let installdir = client.apps().app_install_dir(AppId::from(appid));
 
-        get_install_dir_exes(installdir)
+        None
     }
     
     #[napi(object)]
@@ -95,7 +67,7 @@ pub mod processes {
 
     #[allow(unused)]
     #[napi]
-    pub fn get_game_processes(appid: u32,linkedgame: Option<String>) -> Vec<ProcessInfo> {
+    pub fn get_game_processes(appid: u32,steampath: String,linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use std::process::Command;
         use serde_json::{from_str,Value,Error};
 
@@ -103,7 +75,7 @@ pub mod processes {
 
         let mut exes = match linkedgame {
             Some(game) => vec![game],
-            None => get_game_exes(appid)
+            None => vec![get_appinfo_exe(appid,steampath).unwrap()]
         };
 
         if cfg!(target_os="windows") {
@@ -113,8 +85,6 @@ pub mod processes {
         let output: std::process::Output;
         let cmd = if cfg!(target_os="windows") {
             "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
-            // "Get-WmiObject Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
-            // "Get-Process | where { $_.MainWindowTitle } | foreach { $wmi = Get-WmiObject Win32_Process -Filter \"ProcessId = $($_.Id)\"; $_ | select @{Name=\"ProcessName\";Expression={$wmi.ProcessName}}, @{Name=\"ProcessId\";Expression={$wmi.ProcessId}}, @{Name=\"ExecutablePath\";Expression={$wmi.ExecutablePath}}, MainWindowTitle } | ConvertTo-Json"
         } else if cfg!(target_os="linux") {
             "ps -eo comm,pid,cmd --no-headers"
         } else {
