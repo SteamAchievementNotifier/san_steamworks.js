@@ -46,12 +46,25 @@ pub mod processes {
 
         for entry in launch.values() {
             if let Object(entrymap) = entry {
-                if let Some(String(oslist)) = entrymap.get("config").and_then(|cfg| cfg.get("oslist")) {
-                    if oslist == platform {
-                        if let Some(String(exe)) = entrymap.get("executable") {
-                            return Some(exe.clone());
-                        }
+                let os_match = if let Some(Object(config)) = entrymap.get("config") {
+                    // Returns `false` if "oslist" key is present but does not match the current OS
+                    if let Some(String(oslist)) = config.get("oslist") {
+                        oslist == platform
+                    // If outer "config" key exists but does not contain an inner "oslist" key, assume this entry is for all platforms and match
+                    } else {
+                        true
                     }
+                // If no outer "config" key exists, also assume this entry is for all platforms and match
+                } else {
+                    true
+                };
+
+                if !os_match {
+                    continue;
+                }
+
+                if let Some(String(exe)) = entrymap.get("executable") {
+                    return Some(exe.clone());
                 }
             }
         }
@@ -75,7 +88,16 @@ pub mod processes {
 
         let mut exes = match linkedgame {
             Some(game) => vec![game],
-            None => vec![get_appinfo_exe(appid,steampath).unwrap()]
+            None => match get_appinfo_exe(appid,steampath) {
+                Some(exe) => {
+                    info!("Found executable entry \"{}\" in \"appinfo.vdf\" for AppID {}",exe,appid);
+                    vec![exe]
+                },
+                None => {
+                    error!("Unable to find valid executable entry in \"appinfo.vdf\" for AppID {}",appid);
+                    return Vec::new()
+                }
+            }
         };
 
         if cfg!(target_os="windows") {
