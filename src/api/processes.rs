@@ -22,54 +22,96 @@ pub mod processes {
     #[napi]
     pub fn get_appinfo_for_appid(appid: u32,steampath: String) -> serde_json::Value {
         use appinfovdf::get_appinfo_for_appid;
-        
         get_appinfo_for_appid(appid,&steampath).unwrap_or(serde_json::Value::Null)
     }
 
-    fn get_appinfo_exe(appid: u32,steampath: String) -> Option<String> {
-        use appinfovdf::get_appinfo_for_appid;
-        use serde_json::Value::{Object,String};
-        
-        let appinfo = get_appinfo_for_appid(appid,&steampath);
-        
-        let platform = if cfg!(target_os="windows") {
+    pub fn get_appinfo_exe(appid: u32, steampath: String) -> Option<String> {
+        use std::path::Path;
+        use serde_json::{Value,Map};
+
+        let appinfo = appinfovdf::get_appinfo_for_appid(appid,&steampath)?;
+
+        let platform = if cfg!(target_os = "windows") {
             "windows"
-        } else if cfg!(target_os="linux") {
+        } else if cfg!(target_os = "linux") {
             "linux"
         } else {
             return None;
         };
 
-        let clone = appinfo?;
-        let config = clone.get("config")?;
-        let launch = config.get("launch")?.as_object()?;
+        let launch = appinfo
+            .get("config")?
+            .get("launch")?
+            .as_object()?;
+
+        let mut linux_entry: Option<&Map<String,Value>> = None;
+        let mut windows_entry: Option<&Map<String,Value>> = None;
+        let mut fallback_entry: Option<&Map<String,Value>> = None;
 
         for entry in launch.values() {
-            if let Object(entrymap) = entry {
-                let os_match = if let Some(Object(config)) = entrymap.get("config") {
-                    // Returns `false` if "oslist" key is present but does not match the current OS
-                    if let Some(String(oslist)) = config.get("oslist") {
-                        oslist == platform
-                    // If outer "config" key exists but does not contain an inner "oslist" key, assume this entry is for all platforms and match
-                    } else {
-                        true
-                    }
-                // If no outer "config" key exists, also assume this entry is for all platforms and match
-                } else {
-                    true
-                };
+            let entrymap = entry.as_object()?;
+            let oslist = entrymap
+                .get("config")
+                .and_then(|value| value.as_object())
+                .and_then(|config| config.get("oslist"))
+                .and_then(|value| value.as_str());
 
-                if !os_match {
-                    continue;
-                }
-
-                if let Some(String(exe)) = entrymap.get("executable") {
-                    return Some(exe.clone());
+            match oslist {
+                Some("linux") => {
+                    linux_entry.get_or_insert(entrymap);
+                    break;
+                },
+                Some("windows") => {
+                    windows_entry.get_or_insert(entrymap);
+                },
+                _ => {
+                    fallback_entry.get_or_insert(entrymap);
                 }
             }
         }
 
-        None
+        // On Linux, return the "executable" value for the entry containing `"config.oslist": "linux"`, if present
+        // Otherwise, either:
+        //      - Return the "executable" value for the entry containing `"config.launch[entry].config.oslist": "windows"` as Proton/Wine may be in use, which would require the EXE
+        //      - Just return whatever is there as a fallback
+        let entry = if platform == "linux" {
+            linux_entry
+                .or(windows_entry)
+                .or(fallback_entry)
+        } else {
+            windows_entry
+                .or(fallback_entry)
+        }?;
+
+        let executable = entry.get("executable")?.as_str()?;
+        let executablepath = Path::new(executable);
+
+        // Checks whether "config.launch[<entry>].workingdir" key exists
+        // If so, also checks the "workingdir" value is not also specified in the "executable" value to prevent path duplication
+        let value = if let Some(workingdir) = entry
+            .get("workingdir")
+            .and_then(|value| value.as_str())
+        {
+            let workingdirpath = Path::new(workingdir);
+
+            // Normalise and compare paths in lowercase to prevent unintended mismatches
+            let executable_lowercase = executable.replace("\\","/").to_lowercase();
+            let workingdir_lowercase = workingdir.replace("\\","/").to_lowercase();
+
+            // Use "executable" value if it already contains "workingdir" value
+            if executable_lowercase.starts_with(&workingdir_lowercase) {
+                executablepath.to_path_buf()
+            // If these values differ, prepend "workingdir" value to "executable" value
+            } else {
+                workingdirpath.join(executablepath)
+            }
+        // If no "workingdir" key, return "executable" value as-is
+        } else {
+            executablepath.to_path_buf()
+        };
+
+        // Normalise the resulting path before returning
+        value.to_str().map(|str| str.replace("\\","/").to_string())
     }
     
     #[napi(object)]
