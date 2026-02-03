@@ -113,7 +113,7 @@ pub mod processes {
         // Normalise the resulting path before returning
         value.to_str().map(|str| str.replace("\\","/").to_string())
     }
-    
+
     #[napi(object)]
     pub struct ProcessInfo {
         pub pid: u32,
@@ -149,11 +149,12 @@ pub mod processes {
         let output: std::process::Output;
         let cmd = if cfg!(target_os="windows") {
             "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
-        } else if cfg!(target_os="linux") {
-            "ps -eo comm,pid,cmd --no-headers"
         } else {
             "Unsupported platform"
         };
+
+
+        let json: Result<Value,Error>;
 
         #[cfg(target_os="windows")] {
             use super::win32::{CommandExt,CREATENOWINDOW};
@@ -163,45 +164,22 @@ pub mod processes {
                 .args(["-Command",cmd])
                 .output()
                 .expect("Failed to run process list command");
-        }
 
-        #[cfg(target_os="linux")] {
-            output = Command::new("sh")
-                .args(["-c",cmd])
-                .output()
-                .expect("Failed to execute \"ps\" command");
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        let json: Result<Value,Error>;
-
-        #[cfg(target_os="windows")] {
+            let stdout = String::from_utf8_lossy(&output.stdout);
             json = from_str(&stdout);
         }
-        
+
         #[cfg(target_os="linux")] {
-            use regex::Regex;
-
-            let REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
-
             let mut json_output = Vec::new();
-            let regex = Regex::new(REGEX).expect("Failed to create Regex");
 
-            for line in stdout.lines() {
-                if let Some(captures) = regex.captures(line) {
-                    let process_name = captures.get(1).map_or("<unknown>",|m| m.as_str().trim());
-                    let process_id = captures.get(2).map_or("<unknown>",|m| m.as_str().trim());
-                    let executable_path = captures.get(3).map_or("<unknown>",|m| m.as_str().trim());
-
-                    let json_obj = serde_json::json!({
-                        "ProcessName": process_name,
-                        "ProcessId": process_id,
-                        "ExecutablePath": executable_path
-                    });
-
-                    json_output.push(json_obj);
-                }
+            for proc in procfs::process::all_processes().unwrap() {
+                match get_process_info(proc) {
+                    Err(err) => {
+                        // Skip process, most likely due to permissions
+                        continue;
+                    },
+                    Ok(x) => json_output.push(x)
+                };
             }
 
             let json_array = Value::Array(json_output).to_string();
@@ -224,20 +202,12 @@ pub mod processes {
                             }
                         })
                         .collect::<Vec<_>>();
-    
+
                     for process in stdoutprocesses {
-                        let pid = if cfg!(target_os="windows") {
-                            process["ProcessId"]
-                                .as_u64()
-                                .unwrap_or(0) as u32
-                        } else {
-                            process["ProcessId"]
-                                .as_str()
-                                .unwrap_or("0")
-                                .parse::<u32>()
-                                .unwrap_or(0) as u32
-                        };
-    
+                        let pid = process["ProcessId"]
+                            .as_u64()
+                            .unwrap_or(0) as u32;
+
                         let exe = process["ExecutablePath"]
                             .as_str()
                             .unwrap_or("")
@@ -271,5 +241,38 @@ pub mod processes {
             Some(windowtitle) => windowtitle,
             None => "".to_string()
         }
+    }
+
+    #[cfg(target_os="linux")]
+    fn get_process_info(process: Result<procfs::process::Process, procfs::ProcError>) -> Result<serde_json::Value, procfs::ProcError> {
+        let proc = process?;
+        let process_path = proc.exe()?;
+        let process_id = proc.pid;
+        let cmdline = proc.cmdline()?;
+
+        // app is running through wine, get the real executable from the arguments
+        let mut executable = process_path.file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        if executable == "wine-preloader" || executable == "wine64-preloader" {
+            println!("Found wine process {}", &cmdline[0]);
+            let normalized_path = cmdline[0].clone().replace("\\", "/");
+            let full_path = std::path::PathBuf::from(normalized_path);
+            let actual_name= full_path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            executable = actual_name;
+        }
+
+        return Ok(serde_json::json!({
+            "ProcessName": executable,
+            "ProcessId": process_id,
+            "ExecutablePath": process_path
+        }));
     }
 }

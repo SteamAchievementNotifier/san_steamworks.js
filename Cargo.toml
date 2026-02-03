@@ -28,6 +28,9 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(noop)','cfg(used_linker)'
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 
+[target.'cfg(unix)'.dependencies]
+procfs = "0.16.0"
+
 [build-dependencies]
 napi-build = "2"
 
