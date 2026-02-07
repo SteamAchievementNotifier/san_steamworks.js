@@ -12,6 +12,7 @@ pub mod win32 {
 #[napi]
 pub mod processes {
     use log::{info,error};
+    use serde_json::{Map, Value};
 
     #[napi]
     pub fn get_appinfo(steampath: String) -> serde_json::Value {
@@ -25,19 +26,12 @@ pub mod processes {
         get_appinfo_for_appid(appid,&steampath).unwrap_or(serde_json::Value::Null)
     }
 
-    pub fn get_appinfo_exe(appid: u32, steampath: String) -> Option<String> {
-        use std::path::Path;
+    pub fn get_appinfo_exe(appid: u32, steampath: String) -> Option<Vec<String>> {
         use serde_json::{Value,Map};
 
-        let appinfo = appinfovdf::get_appinfo_for_appid(appid,&steampath)?;
+        let mut executables: Vec<String> = Vec::new();
 
-        let platform = if cfg!(target_os = "windows") {
-            "windows"
-        } else if cfg!(target_os = "linux") {
-            "linux"
-        } else {
-            return None;
-        };
+        let appinfo = appinfovdf::get_appinfo_for_appid(appid,&steampath)?;
 
         let launch = appinfo
             .get("config")?
@@ -70,48 +64,23 @@ pub mod processes {
             }
         }
 
-        // On Linux, return the "executable" value for the entry containing `"config.oslist": "linux"`, if present
-        // Otherwise, either:
-        //      - Return the "executable" value for the entry containing `"config.launch[entry].config.oslist": "windows"` as Proton/Wine may be in use, which would require the EXE
-        //      - Just return whatever is there as a fallback
-        let entry = if platform == "linux" {
-            linux_entry
-                .or(windows_entry)
-                .or(fallback_entry)
-        } else {
-            windows_entry
-                .or(fallback_entry)
-        }?;
+        // Get executables for all platforms to compare against running processes
+        let windows_executable = get_entry_executable(windows_entry);
+        if windows_executable.is_some() {
+            executables.push(windows_executable?);
+        }
 
-        let executable = entry.get("executable")?.as_str()?;
-        let executablepath = Path::new(executable);
+        let linux_executable = get_entry_executable(linux_entry);
+        if linux_executable.is_some() {
+            executables.push(linux_executable?);
+        }
 
-        // Checks whether "config.launch[<entry>].workingdir" key exists
-        // If so, also checks the "workingdir" value is not also specified in the "executable" value to prevent path duplication
-        let value = if let Some(workingdir) = entry
-            .get("workingdir")
-            .and_then(|value| value.as_str())
-        {
-            let workingdirpath = Path::new(workingdir);
+        let fallback_executable = get_entry_executable(fallback_entry);
+        if fallback_executable.is_some() {
+            executables.push(fallback_executable?);
+        }
 
-            // Normalise and compare paths in lowercase to prevent unintended mismatches
-            let executable_lowercase = executable.replace("\\","/").to_lowercase();
-            let workingdir_lowercase = workingdir.replace("\\","/").to_lowercase();
-
-            // Use "executable" value if it already contains "workingdir" value
-            if executable_lowercase.starts_with(&workingdir_lowercase) {
-                executablepath.to_path_buf()
-            // If these values differ, prepend "workingdir" value to "executable" value
-            } else {
-                workingdirpath.join(executablepath)
-            }
-        // If no "workingdir" key, return "executable" value as-is
-        } else {
-            executablepath.to_path_buf()
-        };
-
-        // Normalise the resulting path before returning
-        value.to_str().map(|str| str.replace("\\","/").to_string())
+        return Some(executables);
     }
 
     #[napi(object)]
@@ -122,7 +91,7 @@ pub mod processes {
 
     #[allow(unused)]
     #[napi]
-    pub fn get_game_processes(appid: u32,steampath: String,linkedgame: Option<String>) -> Vec<ProcessInfo> {
+    pub fn get_game_processes(appid: u32, steampath: String, linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use std::process::Command;
         use serde_json::{from_str,Value,Error};
 
@@ -130,13 +99,13 @@ pub mod processes {
 
         let mut exes = match linkedgame {
             Some(game) => vec![game],
-            None => match get_appinfo_exe(appid,steampath) {
-                Some(exe) => {
-                    info!("Found executable entry \"{}\" in \"appinfo.vdf\" for AppID {}",exe,appid);
-                    vec![exe]
+            None => match get_appinfo_exe(appid, steampath) {
+                Some(executables) => {
+                    info!("Found executable entry \"{executables:?}\" in \"appinfo.vdf\" for AppID {appid}");
+                    executables
                 },
                 None => {
-                    error!("Unable to find valid executable entry in \"appinfo.vdf\" for AppID {}",appid);
+                    error!("Unable to find valid executable entry in \"appinfo.vdf\" for AppID {appid}");
                     return Vec::new()
                 }
             }
@@ -146,22 +115,17 @@ pub mod processes {
             exes.push("SAM.Game.exe".to_string());
         }
 
-        let output: std::process::Output;
-        let cmd = if cfg!(target_os="windows") {
-            "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
-        } else {
-            "Unsupported platform"
-        };
-
 
         let json: Result<Value,Error>;
 
         #[cfg(target_os="windows")] {
             use super::win32::{CommandExt,CREATENOWINDOW};
 
+            let output: std::process::Output;
+
             output = Command::new("powershell")
                 .creation_flags(CREATENOWINDOW)
-                .args(["-Command",cmd])
+                .args(["-Command", "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"])
                 .output()
                 .expect("Failed to run process list command");
 
@@ -241,6 +205,40 @@ pub mod processes {
             Some(windowtitle) => windowtitle,
             None => "".to_string()
         }
+    }
+
+    fn get_entry_executable(entry: Option<&Map<String,Value>>) -> Option<String> {
+        use std::path::Path;
+
+        let executable = entry?.get("executable")?.as_str()?;
+        let executablepath = Path::new(executable);
+
+        // Checks whether "config.launch[<entry>].workingdir" key exists
+        // If so, also checks the "workingdir" value is not also specified in the "executable" value to prevent path duplication
+        let value = if let Some(workingdir) = entry
+            ?.get("workingdir")
+            .and_then(|value| value.as_str())
+        {
+            let workingdirpath = Path::new(workingdir);
+
+            // Normalise and compare paths in lowercase to prevent unintended mismatches
+            let executable_lowercase = executable.replace("\\","/").to_lowercase();
+            let workingdir_lowercase = workingdir.replace("\\","/").to_lowercase();
+
+            // Use "executable" value if it already contains "workingdir" value
+            if executable_lowercase.starts_with(&workingdir_lowercase) {
+                executablepath.to_path_buf()
+            // If these values differ, prepend "workingdir" value to "executable" value
+            } else {
+                workingdirpath.join(executablepath)
+            }
+        // If no "workingdir" key, return "executable" value as-is
+        } else {
+            executablepath.to_path_buf()
+        };
+
+        // Normalise the resulting path before returning
+        value.to_str().map(|str| str.replace("\\","/").to_string())
     }
 
     #[cfg(target_os="linux")]
