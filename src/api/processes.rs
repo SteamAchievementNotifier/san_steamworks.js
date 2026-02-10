@@ -101,7 +101,7 @@ pub mod processes {
             Some(game) => vec![game],
             None => match get_appinfo_exe(appid, steampath) {
                 Some(executables) => {
-                    info!("Found executable entry \"{executables:?}\" in \"appinfo.vdf\" for AppID {appid}");
+                    info!("Found executable entries \"{executables:?}\" in \"appinfo.vdf\" for AppID {appid}");
                     executables
                 },
                 None => {
@@ -211,34 +211,16 @@ pub mod processes {
         use std::path::Path;
 
         let executable = entry?.get("executable")?.as_str()?;
-        let executablepath = Path::new(executable);
+        let normalised_executable = &executable.replace("\\", "/");
 
-        // Checks whether "config.launch[<entry>].workingdir" key exists
-        // If so, also checks the "workingdir" value is not also specified in the "executable" value to prevent path duplication
-        let value = if let Some(workingdir) = entry
-            ?.get("workingdir")
-            .and_then(|value| value.as_str())
-        {
-            let workingdirpath = Path::new(workingdir);
-
-            // Normalise and compare paths in lowercase to prevent unintended mismatches
-            let executable_lowercase = executable.replace("\\","/").to_lowercase();
-            let workingdir_lowercase = workingdir.replace("\\","/").to_lowercase();
-
-            // Use "executable" value if it already contains "workingdir" value
-            if executable_lowercase.starts_with(&workingdir_lowercase) {
-                executablepath.to_path_buf()
-            // If these values differ, prepend "workingdir" value to "executable" value
-            } else {
-                workingdirpath.join(executablepath)
-            }
-        // If no "workingdir" key, return "executable" value as-is
-        } else {
-            executablepath.to_path_buf()
-        };
-
-        // Normalise the resulting path before returning
-        value.to_str().map(|str| str.replace("\\","/").to_string())
+        // Make sure to only return the actual file name
+        Some(Path::new(normalised_executable)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+        )
     }
 
     #[cfg(target_os="linux")]
