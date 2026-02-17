@@ -183,6 +183,8 @@ pub mod processes {
         #[cfg(target_os="linux")] {
             use regex::Regex;
 
+            let REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
+
             let mut json_output = Vec::new();
             let regex = Regex::new(REGEX).expect("Failed to create Regex");
 
