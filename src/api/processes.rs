@@ -12,6 +12,7 @@ pub mod win32 {
 #[napi]
 pub mod processes {
     use log::{info,error};
+    use serde_json::{Map, Value};
 
     #[napi]
     pub fn get_appinfo(steampath: String) -> serde_json::Value {
@@ -25,19 +26,12 @@ pub mod processes {
         get_appinfo_for_appid(appid,&steampath).unwrap_or(serde_json::Value::Null)
     }
 
-    pub fn get_appinfo_exe(appid: u32, steampath: String) -> Option<String> {
-        use std::path::Path;
+    pub fn get_appinfo_exe(appid: u32, steampath: String) -> Option<Vec<String>> {
         use serde_json::{Value,Map};
 
-        let appinfo = appinfovdf::get_appinfo_for_appid(appid,&steampath)?;
+        let mut executables: Vec<String> = Vec::new();
 
-        let platform = if cfg!(target_os = "windows") {
-            "windows"
-        } else if cfg!(target_os = "linux") {
-            "linux"
-        } else {
-            return None;
-        };
+        let appinfo = appinfovdf::get_appinfo_for_appid(appid,&steampath)?;
 
         let launch = appinfo
             .get("config")?
@@ -70,50 +64,25 @@ pub mod processes {
             }
         }
 
-        // On Linux, return the "executable" value for the entry containing `"config.oslist": "linux"`, if present
-        // Otherwise, either:
-        //      - Return the "executable" value for the entry containing `"config.launch[entry].config.oslist": "windows"` as Proton/Wine may be in use, which would require the EXE
-        //      - Just return whatever is there as a fallback
-        let entry = if platform == "linux" {
-            linux_entry
-                .or(windows_entry)
-                .or(fallback_entry)
-        } else {
-            windows_entry
-                .or(fallback_entry)
-        }?;
+        // Get executables for all platforms to compare against running processes
+        let windows_executable = get_entry_executable(windows_entry);
+        if windows_executable.is_some() {
+            executables.push(windows_executable?);
+        }
 
-        let executable = entry.get("executable")?.as_str()?;
-        let executablepath = Path::new(executable);
+        let linux_executable = get_entry_executable(linux_entry);
+        if linux_executable.is_some() {
+            executables.push(linux_executable?);
+        }
 
-        // Checks whether "config.launch[<entry>].workingdir" key exists
-        // If so, also checks the "workingdir" value is not also specified in the "executable" value to prevent path duplication
-        let value = if let Some(workingdir) = entry
-            .get("workingdir")
-            .and_then(|value| value.as_str())
-        {
-            let workingdirpath = Path::new(workingdir);
+        let fallback_executable = get_entry_executable(fallback_entry);
+        if fallback_executable.is_some() {
+            executables.push(fallback_executable?);
+        }
 
-            // Normalise and compare paths in lowercase to prevent unintended mismatches
-            let executable_lowercase = executable.replace("\\","/").to_lowercase();
-            let workingdir_lowercase = workingdir.replace("\\","/").to_lowercase();
-
-            // Use "executable" value if it already contains "workingdir" value
-            if executable_lowercase.starts_with(&workingdir_lowercase) {
-                executablepath.to_path_buf()
-            // If these values differ, prepend "workingdir" value to "executable" value
-            } else {
-                workingdirpath.join(executablepath)
-            }
-        // If no "workingdir" key, return "executable" value as-is
-        } else {
-            executablepath.to_path_buf()
-        };
-
-        // Normalise the resulting path before returning
-        value.to_str().map(|str| str.replace("\\","/").to_string())
+        return Some(executables);
     }
-    
+
     #[napi(object)]
     pub struct ProcessInfo {
         pub pid: u32,
@@ -122,7 +91,7 @@ pub mod processes {
 
     #[allow(unused)]
     #[napi]
-    pub fn get_game_processes(appid: u32,steampath: String,linkedgame: Option<String>) -> Vec<ProcessInfo> {
+    pub fn get_game_processes(appid: u32, steampath: String, linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use std::process::Command;
         use serde_json::{from_str,Value,Error};
 
@@ -130,13 +99,13 @@ pub mod processes {
 
         let mut exes = match linkedgame {
             Some(game) => vec![game],
-            None => match get_appinfo_exe(appid,steampath) {
-                Some(exe) => {
-                    info!("Found executable entry \"{}\" in \"appinfo.vdf\" for AppID {}",exe,appid);
-                    vec![exe]
+            None => match get_appinfo_exe(appid, steampath) {
+                Some(executables) => {
+                    info!("Found executable entries \"{executables:?}\" in \"appinfo.vdf\" for AppID {appid}");
+                    executables
                 },
                 None => {
-                    error!("Unable to find valid executable entry in \"appinfo.vdf\" for AppID {}",appid);
+                    error!("Unable to find valid executable entry in \"appinfo.vdf\" for AppID {appid}");
                     return Vec::new()
                 }
             }
@@ -146,62 +115,35 @@ pub mod processes {
             exes.push("SAM.Game.exe".to_string());
         }
 
-        let output: std::process::Output;
-        let cmd = if cfg!(target_os="windows") {
-            "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"
-        } else if cfg!(target_os="linux") {
-            "ps -eo comm,pid,cmd --no-headers"
-        } else {
-            "Unsupported platform"
-        };
-
-        #[cfg(target_os="windows")] {
-            use super::win32::{CommandExt,CREATENOWINDOW};
-
-            output = Command::new("powershell")
-                .creation_flags(CREATENOWINDOW)
-                .args(["-Command",cmd])
-                .output()
-                .expect("Failed to run process list command");
-        }
-
-        #[cfg(target_os="linux")] {
-            output = Command::new("sh")
-                .args(["-c",cmd])
-                .output()
-                .expect("Failed to execute \"ps\" command");
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
 
         let json: Result<Value,Error>;
 
         #[cfg(target_os="windows")] {
+            use super::win32::{CommandExt,CREATENOWINDOW};
+
+            let output: std::process::Output;
+
+            output = Command::new("powershell")
+                .creation_flags(CREATENOWINDOW)
+                .args(["-Command", "Get-CimInstance Win32_Process | Select ProcessName, ProcessId, ExecutablePath | ConvertTo-Json"])
+                .output()
+                .expect("Failed to run process list command");
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
             json = from_str(&stdout);
         }
-        
+
         #[cfg(target_os="linux")] {
-            use regex::Regex;
-
-            let REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
-
             let mut json_output = Vec::new();
-            let regex = Regex::new(REGEX).expect("Failed to create Regex");
 
-            for line in stdout.lines() {
-                if let Some(captures) = regex.captures(line) {
-                    let process_name = captures.get(1).map_or("<unknown>",|m| m.as_str().trim());
-                    let process_id = captures.get(2).map_or("<unknown>",|m| m.as_str().trim());
-                    let executable_path = captures.get(3).map_or("<unknown>",|m| m.as_str().trim());
-
-                    let json_obj = serde_json::json!({
-                        "ProcessName": process_name,
-                        "ProcessId": process_id,
-                        "ExecutablePath": executable_path
-                    });
-
-                    json_output.push(json_obj);
-                }
+            for proc in procfs::process::all_processes().unwrap() {
+                match get_process_info(proc) {
+                    Err(err) => {
+                        // Skip process, most likely due to permissions
+                        continue;
+                    },
+                    Ok(x) => json_output.push(x)
+                };
             }
 
             let json_array = Value::Array(json_output).to_string();
@@ -224,20 +166,12 @@ pub mod processes {
                             }
                         })
                         .collect::<Vec<_>>();
-    
+
                     for process in stdoutprocesses {
-                        let pid = if cfg!(target_os="windows") {
-                            process["ProcessId"]
-                                .as_u64()
-                                .unwrap_or(0) as u32
-                        } else {
-                            process["ProcessId"]
-                                .as_str()
-                                .unwrap_or("0")
-                                .parse::<u32>()
-                                .unwrap_or(0) as u32
-                        };
-    
+                        let pid = process["ProcessId"]
+                            .as_u64()
+                            .unwrap_or(0) as u32;
+
                         let exe = process["ExecutablePath"]
                             .as_str()
                             .unwrap_or("")
@@ -271,5 +205,54 @@ pub mod processes {
             Some(windowtitle) => windowtitle,
             None => "".to_string()
         }
+    }
+
+    fn get_entry_executable(entry: Option<&Map<String,Value>>) -> Option<String> {
+        use std::path::Path;
+
+        let executable = entry?.get("executable")?.as_str()?;
+        let normalised_executable = &executable.replace("\\", "/");
+
+        // Make sure to only return the actual file name
+        Some(Path::new(normalised_executable)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+        )
+    }
+
+    #[cfg(target_os="linux")]
+    fn get_process_info(process: Result<procfs::process::Process, procfs::ProcError>) -> Result<serde_json::Value, procfs::ProcError> {
+        let proc = process?;
+        let process_path = proc.exe()?;
+        let process_id = proc.pid;
+        let cmdline = proc.cmdline()?;
+
+        // app is running through wine, get the real executable from the arguments
+        let mut executable = process_path.file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        if executable == "wine-preloader" || executable == "wine64-preloader" {
+            println!("Found wine process {}", &cmdline[0]);
+            let normalized_path = cmdline[0].clone().replace("\\", "/");
+            let full_path = std::path::PathBuf::from(normalized_path);
+            let actual_name= full_path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            executable = actual_name;
+        }
+
+        return Ok(serde_json::json!({
+            "ProcessName": executable,
+            "ProcessId": process_id,
+            "ExecutablePath": process_path
+        }));
     }
 }
