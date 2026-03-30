@@ -13,105 +13,78 @@ pub mod win32 {
 pub mod processes {
     use log::{info,error};
 
-    #[napi]
-    pub fn get_appinfo(steampath: String) -> serde_json::Value {
-        use appinfovdf::get_appinfo;
-        get_appinfo(&steampath)
-    }
+    static REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
 
-    #[napi]
-    pub fn get_appinfo_for_appid(appid: u32,steampath: String) -> serde_json::Value {
-        use appinfovdf::get_appinfo_for_appid;
-        get_appinfo_for_appid(appid,&steampath).unwrap_or(serde_json::Value::Null)
-    }
-
-    pub fn get_appinfo_exe(appid: u32, steampath: String) -> Option<String> {
+    #[allow(unused_mut)]
+    fn get_install_dir_exes(input: String) -> Vec<String> {
+        use glob::glob;
+        use regex::Regex;
         use std::path::Path;
-        use serde_json::{Value,Map};
 
-        let appinfo = appinfovdf::get_appinfo_for_appid(appid,&steampath)?;
+        let mut install_dir_exes = Vec::new();
 
-        let platform = if cfg!(target_os = "windows") {
-            "windows"
-        } else if cfg!(target_os = "linux") {
-            "linux"
-        } else {
-            return None;
-        };
+        let ext: &str;
 
-        let launch = appinfo
-            .get("config")?
-            .get("launch")?
-            .as_object()?;
-
-        let mut linux_entry: Option<&Map<String,Value>> = None;
-        let mut windows_entry: Option<&Map<String,Value>> = None;
-        let mut fallback_entry: Option<&Map<String,Value>> = None;
-
-        for entry in launch.values() {
-            let entrymap = entry.as_object()?;
-            let oslist = entrymap
-                .get("config")
-                .and_then(|value| value.as_object())
-                .and_then(|config| config.get("oslist"))
-                .and_then(|value| value.as_str());
-
-            match oslist {
-                Some("linux") => {
-                    linux_entry.get_or_insert(entrymap);
-                    break;
-                },
-                Some("windows") => {
-                    windows_entry.get_or_insert(entrymap);
-                },
-                _ => {
-                    fallback_entry.get_or_insert(entrymap);
-                }
-            }
+        #[cfg(target_os="windows")] {
+            ext = ".exe";
         }
 
-        // On Linux, return the "executable" value for the entry containing `"config.oslist": "linux"`, if present
-        // Otherwise, either:
-        //      - Return the "executable" value for the entry containing `"config.launch[entry].config.oslist": "windows"` as Proton/Wine may be in use, which would require the EXE
-        //      - Just return whatever is there as a fallback
-        let entry = if platform == "linux" {
-            linux_entry
-                .or(windows_entry)
-                .or(fallback_entry)
-        } else {
-            windows_entry
-                .or(fallback_entry)
-        }?;
+        #[cfg(target_os="linux")] {
+            ext = "";
+        }
 
-        let executable = entry.get("executable")?.as_str()?;
-        let executablepath = Path::new(executable);
+        let regex = Regex::new(REGEX).expect("Failed to create Regex");
 
-        // Checks whether "config.launch[<entry>].workingdir" key exists
-        // If so, also checks the "workingdir" value is not also specified in the "executable" value to prevent path duplication
-        let value = if let Some(workingdir) = entry
-            .get("workingdir")
-            .and_then(|value| value.as_str())
-        {
-            let workingdirpath = Path::new(workingdir);
+        let executable_path = regex.captures(&input)
+            .map(|captures| captures.get(1)
+            .unwrap()
+            .as_str()
+            .to_string())
+            .unwrap_or_else(|| input);
 
-            // Normalise and compare paths in lowercase to prevent unintended mismatches
-            let executable_lowercase = executable.replace("\\","/").to_lowercase();
-            let workingdir_lowercase = workingdir.replace("\\","/").to_lowercase();
+        let dir = Path::new(&executable_path)
+            .to_str()
+            .unwrap()
+            .to_string();
 
-            // Use "executable" value if it already contains "workingdir" value
-            if executable_lowercase.starts_with(&workingdir_lowercase) {
-                executablepath.to_path_buf()
-            // If these values differ, prepend "workingdir" value to "executable" value
-            } else {
-                workingdirpath.join(executablepath)
+        let pattern = format!("{}/**/*{}",dir,ext);
+
+        for entry in glob(&pattern).expect("Failed to read glob pattern") {
+            match entry {
+                Ok(file) => {
+                    #[cfg(target_os="linux")] {
+                        use std::os::unix::fs::PermissionsExt;
+
+                        let metadata = file.metadata().expect("Failed to get file metadata");
+
+                        if let Some(file_name) = file.file_name() {
+                            let file_name = file_name.to_string_lossy().to_string();
+                            let has_valid_ext = file_name.find(".").is_none() || file_name.ends_with(".sh") || file_name.ends_with(".so") || file_name.ends_with(".exe");
+                            let is_valid = file.is_file() && metadata.permissions().mode() & 0o111 != 0 && has_valid_ext;
+        
+                            if is_valid {
+                                install_dir_exes.push(file_name);
+                            }
+                        }
+                    }
+
+                    #[cfg(target_os="windows")]
+                    install_dir_exes.push(file.file_name().expect("Failed to get file name").to_string_lossy().to_string())
+                },
+                Err(err) => error!("Error while iterating over dir entries: {}",err)
             }
-        // If no "workingdir" key, return "executable" value as-is
-        } else {
-            executablepath.to_path_buf()
-        };
+        }
+    
+        install_dir_exes
+    }
+    
+    fn get_game_exes(appid: u32) -> Vec<String> {
+        use steamworks::AppId;
+    
+        let client = crate::client::get_client();
+        let installdir = client.apps().app_install_dir(AppId::from(appid));
 
-        // Normalise the resulting path before returning
-        value.to_str().map(|str| str.replace("\\","/").to_string())
+        get_install_dir_exes(installdir)
     }
     
     #[napi(object)]
@@ -122,7 +95,7 @@ pub mod processes {
 
     #[allow(unused)]
     #[napi]
-    pub fn get_game_processes(appid: u32,steampath: String,linkedgame: Option<String>) -> Vec<ProcessInfo> {
+    pub fn get_game_processes(appid: u32,linkedgame: Option<String>) -> Vec<ProcessInfo> {
         use std::process::Command;
         use serde_json::{from_str,Value,Error};
 
@@ -130,16 +103,7 @@ pub mod processes {
 
         let mut exes = match linkedgame {
             Some(game) => vec![game],
-            None => match get_appinfo_exe(appid,steampath) {
-                Some(exe) => {
-                    info!("Found executable entry \"{}\" in \"appinfo.vdf\" for AppID {}",exe,appid);
-                    vec![exe]
-                },
-                None => {
-                    error!("Unable to find valid executable entry in \"appinfo.vdf\" for AppID {}",appid);
-                    return Vec::new()
-                }
-            }
+            None => get_game_exes(appid)
         };
 
         if cfg!(target_os="windows") {
@@ -182,8 +146,6 @@ pub mod processes {
         
         #[cfg(target_os="linux")] {
             use regex::Regex;
-
-            let REGEX: &str = r#"^(.+?)\s+(\d+)\s+(.+)$"#;
 
             let mut json_output = Vec::new();
             let regex = Regex::new(REGEX).expect("Failed to create Regex");
