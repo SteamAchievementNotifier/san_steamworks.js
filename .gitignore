@@ -4,4 +4,5 @@ node_modules
 test/**/package-lock.json
 test/electron/steamworks.js-electron-test-*
 **/*.old
+*.old*
 desktop.ini

@@ -7,39 +7,49 @@ pub mod callback {
         // threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode}
     };
 
-    #[napi]
-    pub struct Handle {
-        handle: Option<steamworks::CallbackHandle>,
-    }
-
-    #[napi]
-    impl Handle {
-        #[napi]
-        pub fn disconnect(&mut self) {
-            if let Some(handle) = self.handle.take() {
-                handle.disconnect();
-            }
-        }
-    }
-
+    // Required to prevent `TypeError: Cannot read properties of undefined (reading 'SteamCallback')` on game launch
     #[napi]
     pub enum SteamCallback {
-        PersonaStateChange,
-        SteamServersConnected,
-        SteamServersDisconnected,
-        SteamServerConnectFailure,
-        LobbyDataUpdate,
-        LobbyChatUpdate,
-        P2PSessionRequest,
-        P2PSessionConnectFail,
-        GameLobbyJoinRequested,
-        MicroTxnAuthorizationResponse,
+        Dummy
     }
+
+    // #[napi]
+    // pub struct Handle {
+    //     handle: Option<steamworks::CallbackHandle>,
+    // }
+
+    // #[napi]
+    // impl Handle {
+    //     #[napi]
+    //     pub fn disconnect(&mut self) {
+    //         if let Some(handle) = self.handle.take() {
+    //             handle.disconnect();
+    //         }
+    //     }
+    // }
+
+    // #[napi]
+    // pub enum SteamCallback {
+    //     PersonaStateChange,
+    //     SteamServersConnected,
+    //     SteamServersDisconnected,
+    //     SteamServerConnectFailure,
+    //     LobbyDataUpdate,
+    //     LobbyChatUpdate,
+    //     P2PSessionRequest,
+    //     P2PSessionConnectFail,
+    //     GameLobbyJoinRequested,
+    //     MicroTxnAuthorizationResponse,
+    //     ScreenshotReady,
+    //     ScreenshotRequested
+    // }
+
+    // use napi::threadsafe_function::{ThreadsafeFunction,ThreadsafeFunctionCallMode,ErrorStrategy};
 
     // #[napi(ts_generic_types = "C extends keyof import('./callbacks').CallbackReturns")]
     // pub fn register(
     //     #[napi(ts_arg_type = "C")] steam_callback: SteamCallback,
-    //     #[napi(ts_arg_type = "(value: import('./callbacks').CallbackReturns[C]) => void")] handler: JsFunction,
+    //     #[napi(ts_arg_type = "(value: import('./callbacks').CallbackReturns[C]) => void")] handler: napi::JsFunction,
     // ) -> Handle {
     //     let threadsafe_handler: ThreadsafeFunction<serde_json::Value, ErrorStrategy::Fatal> =
     //         handler

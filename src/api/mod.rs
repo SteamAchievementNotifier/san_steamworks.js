@@ -3,6 +3,7 @@ pub mod apps;
 pub mod callback;
 pub mod localplayer;
 pub mod log;
+pub mod screenshots;
 pub mod utils;
 pub mod processes;
 pub mod wininfo;

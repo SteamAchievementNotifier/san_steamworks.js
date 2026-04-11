@@ -95,9 +95,9 @@ pub mod achievement {
                 .get_achievement_icon()
             {
                 return Some(Icon {
-                    handle: icon.handle,
-                    width: icon.width,
-                    height: icon.height
+                    handle: icon.0,
+                    width: icon.1,
+                    height: icon.2
                 })
             } else {
                 error!("{}/{}: Retrying attempt to fetch achievement icon for {}",i,MAX,&achievement);

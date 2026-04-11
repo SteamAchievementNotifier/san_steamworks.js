@@ -20,7 +20,7 @@ pub fn init(app_id: Option<u32>) -> core::result::Result<(), Error> {
         .unwrap_or_else(Client::init)
         .map_err(|e| Error::from_reason(e.to_string()))?;
 
-    steam_client.user_stats().request_current_stats();
+    steam_client.user_stats().request_user_stats(steam_client.user().steam_id().raw());
     steam_client.user_stats().request_global_achievement_percentages(move|result|{
         match result {
             Ok(id) => {
