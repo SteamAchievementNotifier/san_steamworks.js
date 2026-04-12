@@ -463,7 +463,7 @@ dependencies = [
 [[package]]
 name = "steamworks"
 version = "0.12.2"
-source = "git+https://github.com/SteamAchievementNotifier/san_steamworks-rs.git#04b5a92ac164a31c20e0794a67fe405e22ead7b1"
+source = "git+https://github.com/SteamAchievementNotifier/san_steamworks-rs.git#c196d9ec6fd300b01676445059cf9fd1396ff625"
 dependencies = [
  "bitflags",
  "paste",
@@ -475,7 +475,7 @@ dependencies = [
 [[package]]
 name = "steamworks-sys"
 version = "0.12.0"
-source = "git+https://github.com/SteamAchievementNotifier/san_steamworks-rs.git#04b5a92ac164a31c20e0794a67fe405e22ead7b1"
+source = "git+https://github.com/SteamAchievementNotifier/san_steamworks-rs.git#c196d9ec6fd300b01676445059cf9fd1396ff625"
 
 [[package]]
 name = "steamworksjs"

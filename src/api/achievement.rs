@@ -78,14 +78,14 @@ pub mod achievement {
     }
 
     #[napi(object)]
-    pub struct Icon {
+    pub struct AchievementIcon {
         pub handle: Vec<u8>,
         pub width: u32,
         pub height: u32
     }
 
     #[napi]
-    pub fn get_achievement_icon(achievement: String) -> Option<Icon> {
+    pub fn get_achievement_icon(achievement: String) -> Option<AchievementIcon> {
         let client = crate::client::get_client();
 
         for i in 0..MAX {
@@ -94,10 +94,10 @@ pub mod achievement {
                 .achievement(&achievement)
                 .get_achievement_icon()
             {
-                return Some(Icon {
-                    handle: icon.0,
-                    width: icon.1,
-                    height: icon.2
+                return Some(AchievementIcon {
+                    handle: icon.handle,
+                    width: icon.width,
+                    height: icon.height
                 })
             } else {
                 error!("{}/{}: Retrying attempt to fetch achievement icon for {}",i,MAX,&achievement);
@@ -106,7 +106,8 @@ pub mod achievement {
         }
 
         error!("{}/{} ATTEMPTS FAILED: Failed to fetch achievement icon for {}",MAX,MAX,&achievement);
-        Some(Icon {
+        
+        Some(AchievementIcon {
             handle: vec![0],
             width: 0,
             height: 0
